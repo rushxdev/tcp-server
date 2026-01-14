@@ -17,7 +17,7 @@ void server_start(int port) {
     addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr))<0) {
-        perrror("bind error");
+        perror("bind error");
         exit(1);
     }
 
@@ -37,7 +37,21 @@ void server_start(int port) {
     printf("Client connected\n");
 
     char buffer[1024];
-    read(client_fd, buffer, sizeof(buffer));
+
+    while (1) {
+        ssize_t bytes_read = read(client_fd, buffer, sizeof(buffer));
+
+        if (bytes_read == 0) {
+            break;
+        }
+
+        if (bytes_read <0) {
+            perror("read failed");
+            break;
+        }
+
+        write(client_fd, buffer, bytes_read);
+    }
 
     close(client_fd);
     close(server_fd);
