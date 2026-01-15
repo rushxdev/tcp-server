@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
+//main server function
 void server_start(int port) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd <0) {
@@ -28,31 +29,50 @@ void server_start(int port) {
 
     printf("Listening on port %d...\n", port);
 
-    int client_fd = accept(server_fd, NULL, NULL);
-    if (client_fd <0) {
-        perror("Accept failed");
-        exit(1);
-    }
+    while (1) {
 
-    printf("Client connected\n");
+        int client_fd = accept(server_fd, NULL, NULL);
+
+        if (client_fd <0) {
+            perror("Accept failed");
+            exit(1);
+        }
+
+        //Creating child processes for handling multiple clients
+        pid_t pid = fork();
+
+        if (pid == 0) {
+            close(server_fd);
+            handle_client(client_fd);
+            exit(0);
+        } else if (pid > 0) {
+            close(client_fd);
+        } else {
+            perror("fork failed");
+        }
+    }
+}
+
+//Client handling function
+void handle_client(int client_fd) {
 
     char buffer[1024];
+
+    printf("PID=%d Client connected.\n", getpid());
 
     while (1) {
         ssize_t bytes_read = read(client_fd, buffer, sizeof(buffer));
 
         if (bytes_read == 0) {
+            printf("client disconnected gracefully.\n");
             break;
         }
 
-        if (bytes_read <0) {
+        if (bytes_read < 0) {
             perror("read failed");
             break;
         }
 
         write(client_fd, buffer, bytes_read);
     }
-
-    close(client_fd);
-    close(server_fd);
 }

@@ -1,3 +1,7 @@
-server
+#build artifacts
+tcp_server
 *.o
+src/tcp_server
+
+#IDE
 .idea/
