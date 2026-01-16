@@ -2,11 +2,17 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O2
 TARGET = tcp_server
 SRC = src/main.c src/server.c
+BIN = src/$(TARGET)
 
-all: $(TARGET)
+all: $(BIN)
 
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) $(SRC) -o src/$(TARGET)
+$(BIN): $(SRC)
+	$(CC) $(CFLAGS) $(SRC) -o $(BIN)
+
+run: $(BIN)
+	./$(BIN)
 
 clean:
 	rm -f src/$(TARGET) *.o
+
+.PHONY: all run clean

@@ -3,6 +3,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+void handle_client(int client_fd);
+void reap_children(int signo);
 
 //main server function
 void server_start(int port) {
@@ -28,6 +33,13 @@ void server_start(int port) {
     }
 
     printf("Listening on port %d...\n", port);
+
+    struct sigaction sa;
+    sa.sa_handler = reap_children;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+
+    sigaction(SIGCHLD, &sa, NULL);
 
     while (1) {
 
@@ -74,5 +86,11 @@ void handle_client(int client_fd) {
         }
 
         write(client_fd, buffer, bytes_read);
+    }
+}
+
+void reap_children(int signo) {
+    (void)signo;
+    while (waitpid(-1, NULL, WNOHANG)>0) {
     }
 }
