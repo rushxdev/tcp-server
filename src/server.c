@@ -3,13 +3,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <pthread.h>
 
-void handle_client(int client_fd);
-void reap_children(int signo);
-void* thread_main(void* arg);
+fd_set master_set;
+fd_set read_set;
+int max_fd;
 
 //main server function
 void server_start(int port) {
@@ -36,66 +33,48 @@ void server_start(int port) {
 
     printf("Listening on port %d...\n", port);
 
-    struct sigaction sa;
-    sa.sa_handler = reap_children;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
+    FD_ZERO(&master_set);
+    FD_SET(server_fd, &master_set);
+	max_fd = server_fd;
 
-    sigaction(SIGCHLD, &sa, NULL);
+	while (1) {
+	    read_set = master_set;
 
-    while (1) {
+	    int ready = select(max_fd + 1, &read_set, NULL, NULL, NULL);
+	    if(ready<0) {
+	        perror("Select failed");
+	        break;
+	    }
 
-        int client_fd = accept(server_fd, NULL, NULL);
+	    for(int fd = 0; fd <= max_fd; fd++) {
 
-        if (client_fd <0) {
-            perror("Accept failed");
-            exit(1);
-        }
+	        if (!FD_ISSET(fd, &read_set))
+	            continue;
 
-		//Using threads fir handling clients instead of fork()
-		int* client_fd_ptr = malloc(sizeof(int));
-		*client_fd_ptr = client_fd;
+	        if (fd == server_fd) {
+	            int client_fd = accept(server_fd, NULL, NULL);
+	            if (client_fd <0 ) {
+	                perror("Accept failed");
+	                continue;
+	            }
 
-		pthread_t tid;
-		pthread_create(&tid, NULL, thread_main, client_fd_ptr);
-		pthread_detach(tid);
-    }
-}
+	            FD_SET (client_fd, &master_set);
+	            if (client_fd > max_fd) {
+	                max_fd = client_fd;
+	            }
 
-//Client handling function
-void handle_client(int client_fd) {
+	        } else {
+	            char buffer[1024];
+	            ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
 
-    char buffer[1024];
+	            if(bytes_read <=0) {
+	                close(fd);
+	                FD_CLR(fd, &master_set);
+	            } else {
+	                write(fd, buffer, bytes_read);
+	            }
+	        }
+	    }
 
-    printf("PID=%d Client connected.\n", getpid());
-
-    while (1) {
-        ssize_t bytes_read = read(client_fd, buffer, sizeof(buffer));
-
-        if (bytes_read == 0) {
-            printf("client disconnected gracefully.\n");
-            break;
-        }
-
-        if (bytes_read < 0) {
-            perror("read failed");
-            break;
-        }
-
-        write(client_fd, buffer, bytes_read);
-    }
-}
-
-void reap_children(int signo) {
-    (void)signo;
-    while (waitpid(-1, NULL, WNOHANG)>0) {
-    }
-}
-
-void* thread_main(void* arg){
-	int client_fd = *(int*)arg;
-	free(arg);
-
-	handle_client(client_fd);
-	return NULL;
+	}
 }
