@@ -5,9 +5,11 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <pthread.h>
 
 void handle_client(int client_fd);
 void reap_children(int signo);
+void* thread_main(void* arg);
 
 //main server function
 void server_start(int port) {
@@ -50,18 +52,13 @@ void server_start(int port) {
             exit(1);
         }
 
-        //Creating child processes for handling multiple clients
-        pid_t pid = fork();
+		//Using threads fir handling clients instead of fork()
+		int* client_fd_ptr = malloc(sizeof(int));
+		*client_fd_ptr = client_fd;
 
-        if (pid == 0) {
-            close(server_fd);
-            handle_client(client_fd);
-            exit(0);
-        } else if (pid > 0) {
-            close(client_fd);
-        } else {
-            perror("fork failed");
-        }
+		pthread_t tid;
+		pthread_create(&tid, NULL, thread_main, client_fd_ptr);
+		pthread_detach(tid);
     }
 }
 
@@ -93,4 +90,12 @@ void reap_children(int signo) {
     (void)signo;
     while (waitpid(-1, NULL, WNOHANG)>0) {
     }
+}
+
+void* thread_main(void* arg){
+	int client_fd = *(int*)arg;
+	free(arg);
+
+	handle_client(client_fd);
+	return NULL;
 }
