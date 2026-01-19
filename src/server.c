@@ -3,10 +3,22 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <string.h>
+
+#define MAX_CLIENTS FD_SETSIZE
+#define BUF_SIZE 4096
 
 fd_set master_set;
 fd_set read_set;
 int max_fd;
+
+typedef struct {
+	int fd;
+	char buffer[BUF_SIZE];
+	size_t buffer_len;
+} client_t;
+
+client_t clients[MAX_CLIENTS];
 
 //main server function
 void server_start(int port) {
@@ -15,6 +27,10 @@ void server_start(int port) {
         perror("Socket creation failed");
         exit(1);
     }
+
+	for (int i = 0; i < MAX_CLIENTS; i++) {
+		clients[i].fd = -1;
+	}
 
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
@@ -58,21 +74,46 @@ void server_start(int port) {
 	                continue;
 	            }
 
+	        	clients[client_fd].fd = client_fd;
+	        	clients[client_fd].buffer_len = 0;
+
 	            FD_SET (client_fd, &master_set);
 	            if (client_fd > max_fd) {
 	                max_fd = client_fd;
 	            }
 
 	        } else {
-	            char buffer[1024];
-	            ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
+	            client_t* c = &clients[fd];
+
+	        	ssize_t bytes_read = read(fd,
+	        		c->buffer + c->buffer_len,
+	        		BUF_SIZE - c->buffer_len
+	        		);
 
 	            if(bytes_read <=0) {
 	                close(fd);
 	                FD_CLR(fd, &master_set);
-	            } else {
-	                write(fd, buffer, bytes_read);
+	            	c->fd = -1;
 	            }
+	        	c->buffer_len += bytes_read;
+
+	        	size_t start = 0;
+
+	        	for (size_t i=0; i < c-> buffer_len; i++){
+	        		if (c->buffer[i] == '\n') {
+	        			size_t msg_len = i - start + 1;
+
+	        			write(fd, c->buffer + start, msg_len);
+
+	        			start = i +1;
+	        		}
+	            }
+
+	        	if (start > 0) {
+	        		memmove(c-> buffer, c->buffer + start, c->buffer_len - start);
+	        		c->buffer_len -= start;
+	        	}
+
 	        }
 	    }
 
