@@ -42,7 +42,7 @@ void server_start(int port) {
         exit(1);
     }
 
-    if (listen(server_fd, 1) <0) {
+    if (listen(server_fd, SOMAXCONN) <0) {
         perror("Listening failed");
         exit(1);
     }
@@ -69,7 +69,7 @@ void server_start(int port) {
 
 	        if (fd == server_fd) {
 	            int client_fd = accept(server_fd, NULL, NULL);
-	            if (client_fd <0 ) {
+	            if (client_fd >=MAX_CLIENTS ) {
 	                perror("Accept failed");
 	                continue;
 	            }
@@ -85,7 +85,16 @@ void server_start(int port) {
 	        } else {
 	            client_t* c = &clients[fd];
 
-	        	ssize_t bytes_read = read(fd,
+	        	if (c->buffer_len == BUF_SIZE) {
+	        		close(fd);
+	        		FD_CLR(fd, &master_set);
+	        		c->fd = -1;
+	        		c->buffer_len = 0;
+	        		continue;
+	        	}
+
+	        	ssize_t bytes_read = read(
+	        		fd,
 	        		c->buffer + c->buffer_len,
 	        		BUF_SIZE - c->buffer_len
 	        		);
@@ -94,7 +103,10 @@ void server_start(int port) {
 	                close(fd);
 	                FD_CLR(fd, &master_set);
 	            	c->fd = -1;
+	            	c->buffer_len = 0;
+	            	continue;
 	            }
+
 	        	c->buffer_len += bytes_read;
 
 	        	size_t start = 0;
