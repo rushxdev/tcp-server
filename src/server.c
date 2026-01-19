@@ -4,13 +4,14 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <sys/epoll.h>
+#include <fcntl.h>
 
-#define MAX_CLIENTS FD_SETSIZE
+#define MAX_EVENTS 64
+#define MAX_CLIENTS 1024
 #define BUF_SIZE 4096
 
-fd_set master_set;
-fd_set read_set;
-int max_fd;
+struct epoll_event events[MAX_EVENTS];
 
 typedef struct {
 	int fd;
@@ -27,6 +28,12 @@ void server_start(int port) {
         perror("Socket creation failed");
         exit(1);
     }
+
+	int epoll_fd = epoll_create1(0);
+	if (epoll_fd <0) {
+		perror("epoll_create failed");
+		exit(1);
+	}
 
 	for (int i = 0; i < MAX_CLIENTS; i++) {
 		clients[i].fd = -1;
@@ -49,47 +56,52 @@ void server_start(int port) {
 
     printf("Listening on port %d...\n", port);
 
-    FD_ZERO(&master_set);
-    FD_SET(server_fd, &master_set);
-	max_fd = server_fd;
+	struct epoll_event ev;
+	ev.events = EPOLLIN;
+	ev.data.fd = server_fd;
+	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev);
 
 	while (1) {
-	    read_set = master_set;
 
-	    int ready = select(max_fd + 1, &read_set, NULL, NULL, NULL);
-	    if(ready<0) {
-	        perror("Select failed");
-	        break;
-	    }
+		int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 
-	    for(int fd = 0; fd <= max_fd; fd++) {
+		for (int i = 0; i <n; i++){
 
-	        if (!FD_ISSET(fd, &read_set))
-	            continue;
+			int fd = events[i].data.fd;
 
 	        if (fd == server_fd) {
-	            int client_fd = accept(server_fd, NULL, NULL);
-	            if (client_fd >=MAX_CLIENTS ) {
-	                perror("Accept failed");
-	                continue;
-	            }
+	        	while (1) {
+	        		int client_fd = accept(server_fd, NULL, NULL);
+	        		if (client_fd <0) {
+	        			if (errno == EAGAIN || errno ==EWOULDBLOCK)
+	        				break;
+	        			perror("accept error");
+	        			break;
+	        		}
+	        	}
+
+	        	make_nonblocking(client_fd);
 
 	        	clients[client_fd].fd = client_fd;
 	        	clients[client_fd].buffer_len = 0;
 
-	            FD_SET (client_fd, &master_set);
-	            if (client_fd > max_fd) {
-	                max_fd = client_fd;
-	            }
+	        	ev.events = EPOLLIN;
+	        	ev.data.fd = client_fd;
+	        	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) < 0) {
+	        		perror("epoll_ctl failed");
+	        		close(client_fd);
+	        		continue;
+	        	};
+
 
 	        } else {
 	            client_t* c = &clients[fd];
 
 	        	if (c->buffer_len == BUF_SIZE) {
+	        		epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
 	        		close(fd);
-	        		FD_CLR(fd, &master_set);
-	        		c->fd = -1;
-	        		c->buffer_len = 0;
+	        		clients[fd].fd = -1;
+	        		clients[fd].buffer_len = 0;
 	        		continue;
 	        	}
 
@@ -100,10 +112,10 @@ void server_start(int port) {
 	        		);
 
 	            if(bytes_read <=0) {
-	                close(fd);
-	                FD_CLR(fd, &master_set);
-	            	c->fd = -1;
-	            	c->buffer_len = 0;
+	            	epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+	            	close(fd);
+	            	clients[fd].fd = -1;
+	            	clients[fd].buffer_len = 0;
 	            	continue;
 	            }
 
@@ -130,4 +142,9 @@ void server_start(int port) {
 	    }
 
 	}
+}
+
+void make_nonblocking(int fd) {
+	int flags = fcntl(fd,F_GETFL, 0);
+	fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
