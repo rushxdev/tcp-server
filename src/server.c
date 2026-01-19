@@ -6,10 +6,13 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #define MAX_EVENTS 64
-#define MAX_CLIENTS 1024
+#define MAX_CLIENTS 10000
 #define BUF_SIZE 4096
+
+void make_nonblocking(int fd);
 
 struct epoll_event events[MAX_EVENTS];
 
@@ -28,6 +31,8 @@ void server_start(int port) {
         perror("Socket creation failed");
         exit(1);
     }
+
+	make_nonblocking(server_fd);
 
 	int epoll_fd = epoll_create1(0);
 	if (epoll_fd <0) {
@@ -73,27 +78,29 @@ void server_start(int port) {
 	        	while (1) {
 	        		int client_fd = accept(server_fd, NULL, NULL);
 	        		if (client_fd <0) {
-	        			if (errno == EAGAIN || errno ==EWOULDBLOCK)
+	        			if (errno == EAGAIN || errno == EWOULDBLOCK)
 	        				break;
 	        			perror("accept error");
 	        			break;
 	        		}
+
+	        		make_nonblocking(client_fd);
+
+	        		if (client_fd >= MAX_CLIENTS) {
+	        			close(client_fd);
+	        			continue;
+	        		}
+	        		clients[client_fd].fd = client_fd;
+	        		clients[client_fd].buffer_len = 0;
+
+	        		ev.events = EPOLLIN;
+	        		ev.data.fd = client_fd;
+	        		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) < 0) {
+	        			perror("epoll_ctl failed");
+	        			close(client_fd);
+	        			continue;
+	        		}
 	        	}
-
-	        	make_nonblocking(client_fd);
-
-	        	clients[client_fd].fd = client_fd;
-	        	clients[client_fd].buffer_len = 0;
-
-	        	ev.events = EPOLLIN;
-	        	ev.data.fd = client_fd;
-	        	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) < 0) {
-	        		perror("epoll_ctl failed");
-	        		close(client_fd);
-	        		continue;
-	        	};
-
-
 	        } else {
 	            client_t* c = &clients[fd];
 
@@ -112,6 +119,8 @@ void server_start(int port) {
 	        		);
 
 	            if(bytes_read <=0) {
+	            	if (errno == EAGAIN || errno == EWOULDBLOCK)
+	            		continue;
 	            	epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
 	            	close(fd);
 	            	clients[fd].fd = -1;
@@ -127,7 +136,11 @@ void server_start(int port) {
 	        		if (c->buffer[i] == '\n') {
 	        			size_t msg_len = i - start + 1;
 
-	        			write(fd, c->buffer + start, msg_len);
+	        			ssize_t n = write(fd, c->buffer + start, msg_len);
+	        			if (n <= 0 && errno != EAGAIN) {
+	        				close(fd);
+	        				clients[fd].fd = -1;
+	        			}
 
 	        			start = i +1;
 	        		}
